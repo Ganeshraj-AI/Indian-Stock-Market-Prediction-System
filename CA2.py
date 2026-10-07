@@ -1,18 +1,13 @@
 # ============================================================
-# 🍽️ RESTAURANT RATING PREDICTION SYSTEM
-# ML CA2 PROJECT
+# 📈 INDIAN STOCK MARKET PREDICTION SYSTEM
+# Machine Learning CA2 Project
 # ============================================================
 
-# ============================================================
-# 1. IMPORT LIBRARIES
-# ============================================================
-
+import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+import plotly.express as px
 
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
@@ -24,199 +19,243 @@ from sklearn.metrics import (
     r2_score
 )
 
-print("Libraries imported successfully! ✅")
-
 
 # ============================================================
-# 2. CREATE RESTAURANT DATASET
+# 1. PAGE CONFIGURATION
 # ============================================================
 
-np.random.seed(42)
-
-n = 500
-
-cuisines = [
-    "Indian",
-    "Chinese",
-    "Italian",
-    "Fast Food",
-    "Mexican",
-    "Continental"
-]
-
-locations = [
-    "Mumbai",
-    "Pune",
-    "Delhi",
-    "Bangalore",
-    "Hyderabad",
-    "Chennai"
-]
-
-data = pd.DataFrame({
-    "Cuisine": np.random.choice(cuisines, n),
-    "Location": np.random.choice(locations, n),
-    "Cost_for_Two": np.random.randint(200, 2501, n),
-    "Votes": np.random.randint(20, 5001, n),
-    "Online_Delivery": np.random.choice([0, 1], n),
-    "Table_Booking": np.random.choice([0, 1], n),
-    "Preparation_Time": np.random.randint(10, 61, n)
-})
-
-
-# ============================================================
-# 3. CREATE RATING COLUMN
-# ============================================================
-
-rating = (
-    2.5
-    + 0.00025 * data["Votes"]
-    + 0.00015 * data["Cost_for_Two"]
-    + 0.25 * data["Online_Delivery"]
-    + 0.15 * data["Table_Booking"]
-    - 0.008 * data["Preparation_Time"]
-    + np.random.normal(0, 0.20, n)
+st.set_page_config(
+    page_title="Indian Stock Market Prediction",
+    page_icon="📈",
+    layout="wide"
 )
 
-data["Rating"] = np.clip(rating, 1.0, 5.0)
+
+# ============================================================
+# 2. TITLE
+# ============================================================
+
+st.title("📈 Indian Stock Market Prediction System")
+
+st.write(
+    "Machine Learning based prediction and analysis "
+    "of Indian stock market prices."
+)
 
 
 # ============================================================
-# 4. DISPLAY DATASET
+# 3. STOCK SELECTION
 # ============================================================
 
-print("\n" + "=" * 60)
-print("RESTAURANT DATASET")
-print("=" * 60)
+stocks = {
+    "Reliance": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "Infosys": "INFY.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "NIFTY 50": "^NSEI"
+}
 
-print(data.head(10))
+selected_stock = st.selectbox(
+    "📊 Select Stock",
+    list(stocks.keys())
+)
 
-print("\nDataset Shape:")
-print(data.shape)
+ticker = stocks[selected_stock]
 
 
 # ============================================================
-# 5. DATA CLEANING
+# 4. DOWNLOAD STOCK DATA
 # ============================================================
 
-print("\n" + "=" * 60)
-print("DATA CLEANING")
-print("=" * 60)
+st.info("Fetching latest stock market data...")
 
-print("Missing values before cleaning:")
-print(data.isnull().sum())
+try:
+
+    data = yf.download(
+        ticker,
+        period="2y",
+        progress=False,
+        auto_adjust=False
+    )
+
+except Exception as e:
+
+    st.error(
+        f"Unable to download stock data: {e}"
+    )
+
+    st.stop()
+
+
+# ============================================================
+# 5. CHECK DATA
+# ============================================================
+
+if data.empty:
+
+    st.error(
+        "No stock data was found. "
+        "Please check your internet connection."
+    )
+
+    st.stop()
+
+
+# ============================================================
+# 6. FIX MULTI-INDEX COLUMNS
+# ============================================================
+
+if isinstance(data.columns, pd.MultiIndex):
+
+    data.columns = data.columns.get_level_values(0)
+
+
+# ============================================================
+# 7. RESET INDEX
+# ============================================================
+
+data = data.reset_index()
+
+
+# ============================================================
+# 8. DATA CLEANING
+# ============================================================
 
 data = data.drop_duplicates()
+
 data = data.dropna()
 
-print("\nMissing values after cleaning:")
-print(data.isnull().sum())
 
-print("\nData cleaning completed! ✅")
-
-
-# ============================================================
-# 6. ENCODE CATEGORICAL VARIABLES
-# ============================================================
-
-cuisine_encoder = LabelEncoder()
-location_encoder = LabelEncoder()
-
-data["Cuisine_Code"] = cuisine_encoder.fit_transform(
-    data["Cuisine"]
+# Make sure Date is datetime
+data["Date"] = pd.to_datetime(
+    data["Date"]
 )
 
-data["Location_Code"] = location_encoder.fit_transform(
-    data["Location"]
+
+# ============================================================
+# 9. FEATURE ENGINEERING
+# ============================================================
+
+data["Previous_Close"] = (
+    data["Close"].shift(1)
 )
 
-print("\n" + "=" * 60)
-print("ENCODED DATA")
-print("=" * 60)
+data["Day"] = (
+    data["Date"].dt.day
+)
 
-print(data.head())
+data["Month"] = (
+    data["Date"].dt.month
+)
+
+data["Weekday"] = (
+    data["Date"].dt.weekday
+)
+
+data["Moving_Average"] = (
+    data["Close"]
+    .rolling(window=10)
+    .mean()
+)
+
+data["Daily_Return"] = (
+    data["Close"]
+    .pct_change()
+)
+
+
+# Remove rows containing NaN
+data = data.dropna()
 
 
 # ============================================================
-# 7. SELECT FEATURES
+# 10. FEATURES AND TARGET
 # ============================================================
 
 features = [
-    "Cuisine_Code",
-    "Location_Code",
-    "Cost_for_Two",
-    "Votes",
-    "Online_Delivery",
-    "Table_Booking",
-    "Preparation_Time"
+    "Open",
+    "High",
+    "Low",
+    "Volume",
+    "Previous_Close",
+    "Day",
+    "Month",
+    "Weekday",
+    "Moving_Average",
+    "Daily_Return"
 ]
 
 X = data[features]
-y = data["Rating"]
 
-print("\nFeatures used for prediction:")
-print(features)
-
-print("\nTarget variable:")
-print("Rating")
+y = data["Close"]
 
 
 # ============================================================
-# 8. TRAIN-TEST SPLIT
+# 11. CHRONOLOGICAL TRAIN-TEST SPLIT
 # ============================================================
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.20,
-    random_state=42
+split = int(
+    len(data) * 0.80
 )
 
-print("\n" + "=" * 60)
-print("TRAIN TEST SPLIT")
-print("=" * 60)
+X_train = X.iloc[:split]
 
-print("Training data:", X_train.shape)
-print("Testing data:", X_test.shape)
+X_test = X.iloc[split:]
+
+y_train = y.iloc[:split]
+
+y_test = y.iloc[split:]
 
 
 # ============================================================
-# 9. CREATE MACHINE LEARNING MODELS
+# 12. MACHINE LEARNING MODELS
 # ============================================================
 
 models = {
-    "Linear Regression": LinearRegression(),
 
-    "Decision Tree": DecisionTreeRegressor(
-        max_depth=8,
-        random_state=42
-    ),
+    "Linear Regression":
+        LinearRegression(),
 
-    "Random Forest": RandomForestRegressor(
-        n_estimators=100,
-        max_depth=10,
-        random_state=42
-    )
+    "Decision Tree":
+        DecisionTreeRegressor(
+            max_depth=10,
+            random_state=42
+        ),
+
+    "Random Forest":
+        RandomForestRegressor(
+            n_estimators=100,
+            max_depth=10,
+            random_state=42
+        )
 }
 
 
 # ============================================================
-# 10. TRAIN MODELS AND EVALUATE
+# 13. TRAIN AND EVALUATE MODELS
 # ============================================================
 
 results = []
+
 trained_models = {}
+
 predictions = {}
+
 
 for model_name, model in models.items():
 
     # Train model
-    model.fit(X_train, y_train)
+    model.fit(
+        X_train,
+        y_train
+    )
 
     # Predict
-    pred = model.predict(X_test)
+    pred = model.predict(
+        X_test
+    )
 
-    # Evaluation
+    # Metrics
     mae = mean_absolute_error(
         y_test,
         pred
@@ -241,15 +280,20 @@ for model_name, model in models.items():
         r2
     ])
 
-    trained_models[model_name] = model
-    predictions[model_name] = pred
+    trained_models[
+        model_name
+    ] = model
+
+    predictions[
+        model_name
+    ] = pred
 
 
 # ============================================================
-# 11. MODEL EVALUATION TABLE
+# 14. MODEL EVALUATION TABLE
 # ============================================================
 
-results_df = pd.DataFrame(
+result_df = pd.DataFrame(
     results,
     columns=[
         "Model",
@@ -259,22 +303,30 @@ results_df = pd.DataFrame(
     ]
 )
 
-print("\n" + "=" * 60)
-print("MODEL EVALUATION")
-print("=" * 60)
 
-print(
-    results_df.round(4).to_string(index=False)
+# ============================================================
+# 15. DISPLAY MODEL RESULTS
+# ============================================================
+
+st.subheader(
+    "🤖 Model Evaluation"
+)
+
+st.dataframe(
+    result_df.round(3),
+    use_container_width=True
 )
 
 
 # ============================================================
-# 12. FIND BEST MODEL
+# 16. FIND BEST MODEL
 # ============================================================
 
-best_index = results_df["R2 Score"].idxmax()
+best_index = result_df[
+    "R2 Score"
+].idxmax()
 
-best_model_name = results_df.loc[
+best_model_name = result_df.loc[
     best_index,
     "Model"
 ]
@@ -283,364 +335,356 @@ best_model = trained_models[
     best_model_name
 ]
 
-print("\n" + "=" * 60)
-print("BEST MODEL")
-print("=" * 60)
 
-print("Best Model:", best_model_name)
+st.success(
+    f"🏆 Best Model: {best_model_name}"
+)
 
-print(
-    "Best R2 Score:",
-    round(
-        results_df.loc[
-            best_index,
-            "R2 Score"
-        ],
-        4
+
+# ============================================================
+# 17. MODEL COMPARISON GRAPH
+# ============================================================
+
+st.subheader(
+    "📊 Model Performance Comparison"
+)
+
+fig_model = px.bar(
+    result_df,
+    x="Model",
+    y="R2 Score",
+    title="R² Score Comparison"
+)
+
+st.plotly_chart(
+    fig_model,
+    use_container_width=True
+)
+
+
+# ============================================================
+# 18. CURRENT STOCK INFORMATION
+# ============================================================
+
+last = data.iloc[-1]
+
+
+st.subheader(
+    f"📌 {selected_stock} - Latest Information"
+)
+
+
+c1, c2, c3, c4, c5 = st.columns(5)
+
+
+c1.metric(
+    "Open",
+    f"₹{float(last['Open']):.2f}"
+)
+
+c2.metric(
+    "High",
+    f"₹{float(last['High']):.2f}"
+)
+
+c3.metric(
+    "Low",
+    f"₹{float(last['Low']):.2f}"
+)
+
+c4.metric(
+    "Close",
+    f"₹{float(last['Close']):.2f}"
+)
+
+c5.metric(
+    "Volume",
+    f"{int(float(last['Volume'])):,}"
+)
+
+
+# ============================================================
+# 19. PREDICT NEXT CLOSING PRICE
+# ============================================================
+
+latest_features = X.iloc[[-1]]
+
+predicted_price = best_model.predict(
+    latest_features
+)[0]
+
+
+st.subheader(
+    "🔮 Predicted Closing Price"
+)
+
+
+st.metric(
+    "Predicted Next Close",
+    f"₹{predicted_price:.2f}"
+)
+
+
+# ============================================================
+# 20. PRICE CHANGE
+# ============================================================
+
+current_price = float(
+    last["Close"]
+)
+
+price_difference = (
+    predicted_price -
+    current_price
+)
+
+percentage_change = (
+    price_difference /
+    current_price
+) * 100
+
+
+if percentage_change > 0:
+
+    st.success(
+        f"📈 Expected Change: "
+        f"+{percentage_change:.2f}%"
     )
+
+elif percentage_change < 0:
+
+    st.error(
+        f"📉 Expected Change: "
+        f"{percentage_change:.2f}%"
+    )
+
+else:
+
+    st.info(
+        "➡️ Expected Change: 0.00%"
+    )
+
+
+# ============================================================
+# 21. CLOSING PRICE CHART
+# ============================================================
+
+st.subheader(
+    "📈 Closing Price Trend"
+)
+
+fig1 = px.line(
+    data,
+    x="Date",
+    y="Close",
+    title=f"{selected_stock} Closing Price"
+)
+
+st.plotly_chart(
+    fig1,
+    use_container_width=True
 )
 
 
 # ============================================================
-# 13. MODEL COMPARISON GRAPH
+# 22. MOVING AVERAGE CHART
 # ============================================================
 
-plt.figure(figsize=(9, 5))
-
-plt.bar(
-    results_df["Model"],
-    results_df["R2 Score"]
+st.subheader(
+    "📊 Closing Price vs Moving Average"
 )
 
-plt.xlabel("Machine Learning Model")
-plt.ylabel("R² Score")
-
-plt.title(
-    "Restaurant Rating Prediction - Model Comparison"
+fig2 = px.line(
+    data,
+    x="Date",
+    y=[
+        "Close",
+        "Moving_Average"
+    ],
+    title="Close Price vs 10-Day Moving Average"
 )
 
-plt.xticks(rotation=15)
-
-plt.tight_layout()
-plt.show()
-
-
-# ============================================================
-# 14. ACTUAL VS PREDICTED VALUES
-# ============================================================
-
-best_predictions = predictions[
-    best_model_name
-]
-
-plt.figure(figsize=(8, 5))
-
-plt.scatter(
-    y_test,
-    best_predictions,
-    alpha=0.6
+st.plotly_chart(
+    fig2,
+    use_container_width=True
 )
-
-plt.xlabel("Actual Rating")
-plt.ylabel("Predicted Rating")
-
-plt.title(
-    "Actual Rating vs Predicted Rating"
-)
-
-plt.tight_layout()
-plt.show()
 
 
 # ============================================================
-# 15. RATING DISTRIBUTION
+# 23. DAILY RETURN CHART
 # ============================================================
 
-plt.figure(figsize=(8, 5))
-
-plt.hist(
-    data["Rating"],
-    bins=20
+st.subheader(
+    "📉 Daily Return"
 )
 
-plt.xlabel("Restaurant Rating")
-plt.ylabel("Number of Restaurants")
-
-plt.title(
-    "Restaurant Rating Distribution"
+fig3 = px.line(
+    data,
+    x="Date",
+    y="Daily_Return",
+    title="Daily Stock Return"
 )
 
-plt.tight_layout()
-plt.show()
-
-
-# ============================================================
-# 16. COST VS RATING
-# ============================================================
-
-plt.figure(figsize=(8, 5))
-
-plt.scatter(
-    data["Cost_for_Two"],
-    data["Rating"],
-    alpha=0.5
+st.plotly_chart(
+    fig3,
+    use_container_width=True
 )
-
-plt.xlabel("Average Cost for Two (₹)")
-plt.ylabel("Restaurant Rating")
-
-plt.title(
-    "Cost for Two vs Restaurant Rating"
-)
-
-plt.tight_layout()
-plt.show()
 
 
 # ============================================================
-# 17. VOTES VS RATING
+# 24. ACTUAL VS PREDICTED
 # ============================================================
 
-plt.figure(figsize=(8, 5))
-
-plt.scatter(
-    data["Votes"],
-    data["Rating"],
-    alpha=0.5
+st.subheader(
+    "🎯 Actual vs Predicted Closing Price"
 )
 
-plt.xlabel("Number of Votes")
-plt.ylabel("Restaurant Rating")
+comparison_df = pd.DataFrame({
 
-plt.title(
-    "Votes vs Restaurant Rating"
+    "Date": data.iloc[
+        split:
+    ]["Date"].values,
+
+    "Actual": y_test.values,
+
+    "Predicted": predictions[
+        best_model_name
+    ]
+
+})
+
+
+fig4 = px.line(
+    comparison_df,
+    x="Date",
+    y=[
+        "Actual",
+        "Predicted"
+    ],
+    title="Actual vs Predicted Price"
 )
 
-plt.tight_layout()
-plt.show()
+st.plotly_chart(
+    fig4,
+    use_container_width=True
+)
 
 
 # ============================================================
-# 18. FEATURE IMPORTANCE
+# 25. FEATURE IMPORTANCE
 # ============================================================
 
 if best_model_name == "Random Forest":
 
-    importance = best_model.feature_importances_
-
     importance_df = pd.DataFrame({
+
         "Feature": features,
-        "Importance": importance
+
+        "Importance":
+            best_model.feature_importances_
+
     })
 
-    importance_df = importance_df.sort_values(
-        by="Importance",
-        ascending=False
+    importance_df = (
+        importance_df
+        .sort_values(
+            "Importance",
+            ascending=False
+        )
     )
 
-    print("\n" + "=" * 60)
-    print("FEATURE IMPORTANCE")
-    print("=" * 60)
-
-    print(
-        importance_df.round(4).to_string(index=False)
+    st.subheader(
+        "🔍 Feature Importance"
     )
 
-    plt.figure(figsize=(9, 5))
-
-    plt.bar(
-        importance_df["Feature"],
-        importance_df["Importance"]
+    fig5 = px.bar(
+        importance_df,
+        x="Importance",
+        y="Feature",
+        orientation="h",
+        title="Random Forest Feature Importance"
     )
 
-    plt.xlabel("Features")
-    plt.ylabel("Importance")
-
-    plt.title(
-        "Random Forest Feature Importance"
+    st.plotly_chart(
+        fig5,
+        use_container_width=True
     )
 
-    plt.xticks(rotation=45)
-
-    plt.tight_layout()
-    plt.show()
-
 
 # ============================================================
-# 19. RESTAURANT RATING PREDICTION
+# 26. HISTORICAL DATA
 # ============================================================
 
-print("\n" + "=" * 60)
-print("RESTAURANT RATING PREDICTION")
-print("=" * 60)
+st.subheader(
+    "📋 Historical Stock Data"
+)
 
-
-# ------------------------------------------------------------
-# USER INPUT
-# ------------------------------------------------------------
-
-user_cuisine = "Indian"
-
-user_location = "Mumbai"
-
-user_cost = 600
-
-user_votes = 1000
-
-user_online_delivery = 1
-
-user_table_booking = 1
-
-user_preparation_time = 30
-
-
-# ============================================================
-# 20. ENCODE USER INPUT
-# ============================================================
-
-cuisine_code = cuisine_encoder.transform(
-    [user_cuisine]
-)[0]
-
-location_code = location_encoder.transform(
-    [user_location]
-)[0]
-
-
-# ============================================================
-# 21. CREATE INPUT DATA
-# ============================================================
-
-user_input = pd.DataFrame({
-    "Cuisine_Code": [cuisine_code],
-    "Location_Code": [location_code],
-    "Cost_for_Two": [user_cost],
-    "Votes": [user_votes],
-    "Online_Delivery": [user_online_delivery],
-    "Table_Booking": [user_table_booking],
-    "Preparation_Time": [user_preparation_time]
-})
-
-
-# ============================================================
-# 22. PREDICT RATING
-# ============================================================
-
-predicted_rating = best_model.predict(
-    user_input
-)[0]
-
-predicted_rating = np.clip(
-    predicted_rating,
-    1.0,
-    5.0
+st.dataframe(
+    data.tail(20),
+    use_container_width=True
 )
 
 
 # ============================================================
-# 23. DISPLAY PREDICTION
+# 27. PROJECT INFORMATION
 # ============================================================
 
-print("\nRestaurant Details")
-print("-" * 40)
-
-print(
-    "Cuisine:",
-    user_cuisine
+st.sidebar.title(
+    "📚 Project Information"
 )
 
-print(
-    "Location:",
-    user_location
-)
+st.sidebar.write(
+    """
+    **Project Title**
 
-print(
-    "Average Cost for Two: ₹",
-    user_cost
-)
+    Indian Stock Market Prediction
+    System Using Machine Learning
 
-print(
-    "Number of Votes:",
-    user_votes
-)
+    **ML Models**
 
-print(
-    "Online Delivery:",
-    "Yes" if user_online_delivery == 1 else "No"
-)
+    • Linear Regression
 
-print(
-    "Table Booking:",
-    "Yes" if user_table_booking == 1 else "No"
-)
+    • Decision Tree Regression
 
-print(
-    "Preparation Time:",
-    user_preparation_time,
-    "minutes"
-)
+    • Random Forest Regression
 
-print("\n" + "-" * 40)
+    **Evaluation Metrics**
 
-print(
-    "⭐ Predicted Restaurant Rating:",
-    round(predicted_rating, 2),
-    "/ 5.0"
+    • MAE
+
+    • RMSE
+
+    • R² Score
+
+    **Data Source**
+
+    Yahoo Finance
+
+    **Stocks**
+
+    • Reliance
+
+    • TCS
+
+    • Infosys
+
+    • HDFC Bank
+
+    • NIFTY 50
+    """
 )
 
 
 # ============================================================
-# 24. RATING INTERPRETATION
+# 28. DISCLAIMER
 # ============================================================
 
-if predicted_rating >= 4.5:
-
-    print("🌟 Excellent Restaurant")
-
-elif predicted_rating >= 4.0:
-
-    print("😊 Very Good Restaurant")
-
-elif predicted_rating >= 3.0:
-
-    print("👍 Good Restaurant")
-
-elif predicted_rating >= 2.0:
-
-    print("😐 Average Restaurant")
-
-else:
-
-    print("⚠️ Low Rated Restaurant")
+st.warning(
+    "⚠️ This prediction is for educational/project "
+    "purposes only and should not be considered financial advice."
+)
 
 
-# ============================================================
-# 25. FINAL PROJECT SUMMARY
-# ============================================================
-
-print("\n" + "=" * 60)
-print("PROJECT SUMMARY")
-print("=" * 60)
-
-print("""
-Project Title:
-Restaurant Rating Prediction System Using Machine Learning
-
-Machine Learning Algorithms:
-1. Linear Regression
-2. Decision Tree Regression
-3. Random Forest Regression
-
-Evaluation Metrics:
-1. MAE - Mean Absolute Error
-2. RMSE - Root Mean Squared Error
-3. R² Score
-
-Target Variable:
-Restaurant Rating
-
-The system predicts a restaurant's expected rating
-based on restaurant-related features.
-""")
-
-print("Project completed successfully! ✅")
+st.caption(
+    "Indian Stock Market Prediction System | ML CA2 Project"
+)
